@@ -1,0 +1,252 @@
+---
+title: "Average Treatment Effect in the National Supported Work Demonstration"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## Load and create dataset
+
+I will use these datasets from Dehejia and Wahba (1998)[^1]:
+
+[^1]: Dehejia and Wahba
+
+-   **The National Supported Work (NSW) Demonstration**
+
+    -   RE74: include 2 years of pre-intervention earnings
+
+    -   RE75: include 1 years of pre-intervention earnings
+
+-   **PSID1-3 and CSP1-3**
+
+    -   PSID-1: All male household heads less than 55 years old who did not classify themselves as retired in 1975.
+
+    -   PSID-2: Selects from PSID-1 all men who were not working when surveyed in the spring of 1976.
+
+    -   PSID-3: Selects from PSID-2 all men who were not working in 1975.
+
+    -   CPS-1: All CPS males less than 55 years of age.
+
+    -   CPS-2: Selects from CPS-1 all males who were not working when surveyed in March 1976.
+
+    -   CPS-3: Selects from CPS-2 all the unemployed males in 1976 whose income in 1975 was below the poverty level.
+
+    -   PSID1-3 and CPS-1 are identical to those used in Lalonde. CPS 2-3 are similar to those used in Lalonde, but Lalonde’s original subset could not be re-created.
+
+Data Source: <https://users.nber.org/~rdehejia/nswdata2.html>
+
+Now, let's check if the data is similar to the one in the paper.
+
+**a. NSW dataset**
+
+```{r}
+# Load NSW data
+nsw_tr <- read.table("data/nsw_treated.txt", header = FALSE)
+nsw_co <- read.table("data/nsw_control.txt", header = FALSE)
+
+# Assign column names
+col_names <- c("treat", "age", "education", "black", "hispanic", "married", "nodegree", "re75", "re78")
+
+colnames(nsw_tr) <- col_names
+colnames(nsw_co) <- col_names
+```
+
+```{r}
+# Summary statistics for treated
+paste("Number of treated instances:", nrow(nsw_tr))
+sapply(nsw_tr, \(col) round(mean(col), 2))
+
+# Summary statistics for control
+paste("Number of control instances:", nrow(nsw_co))
+sapply(nsw_co, \(col) round(mean(col), 2))
+```
+
+As expected for an experimental dataset, the covariates are balance between treated and control groups.
+
+**b. Re74 subset** This dataset is also experimental but includes a new covariate which is income in 1974 (Dehejia and Wahba).
+
+```{r}
+# Load Re74 data
+re74_tr <- read.table("data/nswre74_treated.txt", header = FALSE)
+re74_co <- read.table("data/nswre74_control.txt", header = FALSE)
+
+# Assign column names
+col_names <- c("treat", "age", "education", "black", "hispanic", "married", "nodegree", "re74", "re75", "re78")
+colnames(re74_tr) <- c(col_names)
+colnames(re74_co) <- c(col_names)
+
+```
+
+```{r}
+# Summary statistics for treated
+paste("Number of treated instances (Re74):", nrow(re74_tr))
+sapply(re74_tr, \(col) round(mean(col, na.rm = TRUE), 2))
+
+# Summary statistics for control
+paste("Number of control instances (Re74):", nrow(re74_co))
+sapply(re74_co, \(col) round(mean(col, na.rm = TRUE), 2))
+```
+
+**b. Comparison groups**
+
+```{r}
+# Load PSID and CPS datasets
+psid1 <- read.table("data/psid_controls.txt", header = FALSE)
+psid2 <- read.table("data/psid2_controls.txt", header = FALSE)
+psid3 <- read.table("data/psid3_controls.txt", header = FALSE)
+
+cps1 <- read.table("data/cps_controls.txt", header = FALSE)
+cps2 <- read.table("data/cps2_controls.txt", header = FALSE)
+cps3 <- read.table("data/cps3_controls.txt", header = FALSE)
+```
+
+```{r}
+# Assign column names
+list_of_dfs <- list(psid1, psid2, psid3, cps1, cps2, cps3)
+
+list_of_dfs <- lapply(list_of_dfs, function(df) {
+  colnames(df) <- col_names
+  return(df)
+})
+
+# Reassign the modified data frames
+psid1 <- list_of_dfs[[1]]
+psid2 <- list_of_dfs[[2]]
+psid3 <- list_of_dfs[[3]]
+cps1 <- list_of_dfs[[4]]
+cps2 <- list_of_dfs[[5]]
+cps3 <- list_of_dfs[[6]]
+```
+
+```{r}
+data_name <- c("PSID-1", "PSID-2", "PSID-3", "CPS-1", "CPS-2", "CPS-3")
+for (i in 1:length(list_of_dfs)) {
+  print(data_name[i])
+  df = list_of_dfs[[i]]
+  
+  means <- sapply(df, \(col) round(mean(col, na.rm = TRUE), 2))
+  print(means)
+}
+```
+
+The covariates are very different from the experimental one.
+
+## The NSW Treatment Earnings Less Comparison Group Earnings
+
+In this section, I try to estimate the average treatment effect (ATE) using both the original and observational samples without controlling covariates[^2].
+
+[^2]: Peng Ding
+
+$$
+\hat{\tau} = \hat{\overline{Y}}(1) - \hat{\overline{Y}}(0)
+$$
+
+### 1. NSW treated group + Observational data
+
+```{r}
+source("scripts/ate_f.R")
+```
+
+```{r}
+# Prepare data
+nsw <- rbind(nsw_co, nsw_tr)
+
+psid1_re75 <- rbind(nsw_tr, subset(psid1, select = -c(re74)))
+psid2_re75 <- rbind(nsw_tr, subset(psid2, select = -c(re74)))
+psid3_re75 <- rbind(nsw_tr, subset(psid3, select = -c(re74)))
+
+cps1_re75 <- rbind(nsw_tr, subset(cps1, select = -c(re74)))
+cps2_re75 <- rbind(nsw_tr, subset(cps2, select = -c(re74)))
+cps3_re75 <- rbind(nsw_tr, subset(cps3, select = -c(re74)))
+```
+
+```{r}
+# Estimate treatment effects
+effects <- list(
+  NSW = ate.experimental(nsw)$est,
+  
+  PSID1 = ate.experimental(psid1_re75)$est,
+  PSID2 = ate.experimental(psid2_re75)$est,
+  PSID3 = ate.experimental(psid3_re75)$est,
+  
+  CPS1 = ate.experimental(cps1_re75)$est,
+  CPS2 = ate.experimental(cps2_re75)$est,
+  CPS3 = ate.experimental(cps3_re75)$est
+)
+```
+
+```{r}
+effects_table <- do.call(rbind, effects)
+rownames(effects_table) <- names(effects)
+
+effects_table
+```
+
+### 2. LDW treated group without RE74
+
+```{r}
+# Prepare data
+re74 <- rbind(re74_co, re74_tr)
+
+psid1_re74 <- rbind(re74_tr, psid1)
+psid2_re74 <- rbind(re74_tr, psid2)
+psid3_re74 <- rbind(re74_tr, psid3)
+
+cps1_re74 <- rbind(re74_tr, cps1)
+cps2_re74 <- rbind(re74_tr, cps2)
+cps3_re74 <- rbind(re74_tr,cps3)
+```
+
+```{r}
+effects2 <- list(
+  NSW = ate.experimental(subset(re74, select = -c(re74)))$est,
+  
+  PSID1 = ate.experimental(subset(psid1_re74, select = -c(re74)))$est,
+  PSID2 = ate.experimental(subset(psid2_re74, select = -c(re74)))$est,
+  PSID3 = ate.experimental(subset(psid3_re74, select = -c(re74)))$est,
+  
+  CPS1 = ate.experimental(subset(cps1_re74, select = -c(re74)))$est,
+  CPS2 = ate.experimental(subset(cps2_re74, select = -c(re74)))$est,
+  CPS3 = ate.experimental(subset(cps3_re74, select = -c(re74)))$est
+)
+
+```
+
+```{r}
+effects_table2 <- do.call(rbind, effects2)
+rownames(effects_table2) <- names(effects2)
+
+effects_table2
+```
+
+### 3. LDW treated group with RE74
+
+```{r}
+effects <- list(
+  NSW = ate.experimental(re74)$est,
+  
+  PSID1 = ate.experimental(psid1_re74)$est,
+  PSID2 = ate.experimental(psid2_re74)$est,
+  PSID3 = ate.experimental(psid3_re74)$est,
+  
+  CPS1 = ate.experimental(cps1_re74)$est,
+  CPS2 = ate.experimental(cps2_re74)$est,
+  CPS3 = ate.experimental(cps3_re74)$est
+)
+
+```
+
+```{r}
+effects_table <- do.call(rbind, effects)
+rownames(effects_table) <- names(effects)
+
+effects_table
+```
+
+## Summary
+
+-   The treatment effect is higher in Panel B.
+
+-   The simple difference in means is negative for PSID1-2 and CPS1-3.
+
+-   Overall, the results of observational studies are far from the result of experimental study.
