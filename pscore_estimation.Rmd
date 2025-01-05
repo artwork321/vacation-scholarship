@@ -1,0 +1,92 @@
+---
+title: "Propensity Score Estimation"
+output: html_notebook
+---
+
+# Propensity Score Estimation
+
+## 1. Logistic model
+
+```{r}
+load("data/ldw_lalonde.RData")
+source("scripts/pscore.R")
+```
+
+We discard controls with propensity score less than the minimum propensity score of treated group. We use the logistic model provided by Dehejia and Wahba to estimate the propensity score[^1].
+
+[^1]: Dehejia, R. and Wahba, S. (1998) *Propensity score matching methods for non-experimental causal studies*. <doi:10.3386/w6829>.
+
+```{r}
+set.seed(42)
+```
+
+We will focus on two datasets, which are PSID1 and CPS1.
+
+```{r}
+# Create two more attributes
+psid1_re74$u74 <- as.integer(psid1_re74$re74 == 0)
+psid1_re74$u75 <- as.integer(psid1_re74$re75 == 0)
+```
+
+These are the propensity score statistics and distribution of PSID-1 + LDW dataset. As we can see, the propensity scores of treated and control group are very different, corresponding to the differences in covariates X.
+
+```{r}
+pscore_psid1 <- estimate_propensity_score(psid1_re74, 
+                treat~ age + I(age^2) + education + I(education^2) + 
+                married + nodegree + black + hispanic + 
+                re74 + I(re74^2) + re75 + I(re75^2) + 
+                u74 * black, method="logistic", is_plot=TRUE)
+```
+
+For CPS 1,
+
+```{r}
+# Create 2 columns u74 and u75
+cps1_re74 <- preprocess_data(cps1_re74)
+```
+
+```{r}
+# Estimate propensity score
+pscore_cps1 <- estimate_propensity_score(cps1_re74, 
+              treat ~ age + I(age^2) + I(age^3) + education + 
+              I(education^2) + married + nodegree + black + 
+              hispanic + re74 + re75 + u74 + u75 + education*re74
+              , is_plot=TRUE)
+```
+
+```{r}
+# Add propensity score
+filtered_psid1 <- pscore_psid1$filter_data
+filtered_psid1$ps <- pscore_psid1$pscore
+
+filtered_cps1 <- pscore_cps1$filter_data
+filtered_cps1$ps <- pscore_cps1$pscore
+```
+
+## 2. Single Index Model
+
+This method is a semi-parametric method. It will be used to compute IPW estimators and QTE.
+
+```{r}
+library(np)
+```
+
+```{r}
+psid1_SI <- estimate_propensity_score(data=psid1_re74, method="SI", optim.method="Nelder-Mead",is_plot=TRUE)
+```
+
+```{r}
+cps1_SI <- estimate_propensity_score(data=cps1_re74, method="SI", is_plot=TRUE, optim.method="CG")
+```
+
+We lost more instances than logistic model.
+
+```{r}
+filtered_psid1_SI <- psid1_SI$filter_data
+filtered_psid1_SI$ps <- psid1_SI$ps
+filtered_psid1_SI <- filtered_psid1_SI[filtered_psid1_SI$ps < 1, ] # Remove those with pscore = 1
+
+filtered_cps1_SI <- cps1_SI$filter_data
+filtered_cps1_SI$ps <- cps1_SI$ps
+filtered_cps1_SI <- filtered_cps1_SI[filtered_cps1_SI$ps < 1, ] # Remove those with pscore = 1
+```

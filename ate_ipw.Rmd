@@ -1,0 +1,135 @@
+---
+title: "ATE with Inverse Propensity Score Weighting"
+output: html_notebook
+---
+
+# B. Inverse Propensity Score Weighting
+
+We have this inverse propensity score weighting estimator[^1].
+
+[^1]: Ding, Peng. (2023). A First Course in Causal Inference. 10.48550/arXiv.2305.18793.
+
+$$
+\widehat{\tau}^{\text{ht}} = n^{-1} \sum_{i=1}^n \frac{Z_iY_i}{\hat{e}(X_i)} - n^{-1} \sum_{i=1}^n \frac{(1 - Z_i)Y_i}{1 - \hat{e}(X_i)}
+$$
+
+and
+
+$$
+\widehat{\tau}^{\text{ht}}_{|T_i=1} = n_1^{-1} \sum_{i=1}^n Z_iY_i - n_1^{-1} \sum_{i=1}^n \frac{\hat{e}(X_i)(1 - Z_i)Y_i}{1 - \hat{e}(X_i)}
+$$
+
+We will use the propensity score estimated by a single index model.
+
+```{r}
+source("scripts/pscore.R")
+source("scripts/ipw.R")
+source("scripts/report.R")
+```
+
+```{r}
+# IPW ATE
+ate.psid1.ipw <- ps_IPW(filtered_psid1_SI, estimand="ATE", norm=FALSE)
+paste("IPW ATE: ", ate.psid1.ipw$est)
+```
+
+```{r}
+# IPW ATE
+att.psid1.ipw <- ps_IPW(filtered_psid1_SI, estimand="ATT", norm=FALSE)
+paste("IPW ATT: ", att.psid1.ipw$est)
+```
+
+Let's check distribution of the weights.
+
+```{r}
+# Extract weights and treatment
+weights <- ate.psid1.ipw$weights
+treat <- filtered_psid1_SI$treat
+
+# Split weights by treatment group
+weights_control <- weights[treat == 0]
+weights_treated <- weights[treat == 1]
+
+# Define histogram breaks
+breaks <- seq(min(weights), max(weights), length.out = 31)
+
+# Plot histograms
+hist(weights_control, breaks = breaks, col = rgb(0, 0, 1, 0.6),
+     main = "Distribution of Weights by Treatment Group",
+     xlab = "Weights", ylab = "Count", xlim = range(weights))
+hist(weights_treated, breaks = breaks, col = rgb(1, 0, 0, 0.6),add = TRUE)
+
+# Add legend
+legend("topright", legend = c("Control", "Treated"),
+       fill = c(rgb(0, 0, 1, 0.6), rgb(1, 0, 0, 0.6)))
+
+```
+
+Some weights are very large, which may violate the overlap condition.
+
+```{r}
+# Create a list of datasets after discarding controls
+SI_datasets <- list(filtered_psid1_SI, filtered_cps1_SI)
+LM_datasets <- list(filtered_psid1, filtered_cps1)
+```
+
+```{r}
+# Compute inverse propensity score weighting ATE for main datasets
+ate_result.SI <- lapply(SI_datasets, function(data) {
+  ps_IPW(data, estimand = "ATE")
+})
+
+# Compute inverse propensity score weighting ATE for main datasets
+ate_result.logistic <- lapply(LM_datasets, function(data) {
+  ps_IPW(data, estimand = "ATE")
+})
+```
+
+```{r}
+# Display result
+row_names <- c("NSW", "PSID-1", "CPS-1")
+col_names <- c("IPW ATE")
+(ate.ipw.results.SI <- create_psm_result(ate_result.SI, row_names, col_names))
+(ate.ipw.results.logistic <- create_psm_result(ate_result.logistic, row_names, col_names))
+```
+
+```{r}
+# Compute inverse propensity score weighting ATT for main datasets
+att_result.SI <- lapply(SI_datasets, function(data) {
+  ps_IPW(data, estimand = "ATT")
+})
+
+# Compute inverse propensity score weighting ATT for main datasets
+att_result.logistic <- lapply(LM_datasets, function(data) {
+  ps_IPW(data, estimand = "ATT")
+})
+```
+
+```{r}
+# Display result
+col_names <- c("IPW ATT")
+(att.ipw.results.SI <- create_psm_result(att_result.SI, row_names, col_names))
+(att.ipw.results.logistic <- create_psm_result(att_result.logistic, row_names, col_names))
+```
+
+## Summary
+
+It has been proved that
+
+$$
+\tau = E\{Y(1) - Y(0)\} = E \left\{ \frac{ZY}{e(X)} - \frac{(1-Z)Y}{1-e(X)} \right\}.
+$$
+
+Under strong ignorability and overlap condition. As the formulas can be very big if the propensity score is very close to 1 or 0, the weighting estimators blow up to infinity resulting in extremely unstable behaviors in finite samples.[^2] As a result, the more we trimmed the psid1 dataset, the better estimate we got.
+
+[^2]: Peng Ding
+
+-   Treated subjects with a very low propensity score can result in a very large weight. Similarly, a control subject with a propensity score close to one can result in a very large weight. Such weights can increase the variability of the estimated treatment effect.[^3] (Why?)
+
+[^3]: P. C. AUSTIN AND E. A. STUART
+
+#### 1. What impacts the IPW estimates -TODO
+
+Most of the extremely large weights correspond to treated units with very small propensity score.
+
+#### 2. IPW vs Matching -TODO

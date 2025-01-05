@@ -1,5 +1,5 @@
 ---
-title: "Average Treatment Effect on the treated with Propensity Score"
+title: "ATE with Propensity Score Matching"
 output:
   html_document:
     df_print: paged
@@ -43,60 +43,25 @@ $$
 {Y(0), Y(1)} \perp\!\!\!\perp T | X = {Y(0), Y(1)} \perp\!\!\!\perp T | p(X)
 $$
 
-## 1. Estimate the propensity score using logistic model for PSID-1 and CPS-1
+## i. PSID1
+
+Following Dehejia and Wahba (1998), I will try to do 1-to-1 nearest propensity score matching and with replacement. The propensity score is estimated by a logistic model.
 
 ```{r}
-load("data/ldw_lalonde.RData")
-source("scripts/ate_f.R")
+source("scripts/pscore.R")
 source("scripts/report.R")
-library(cobalt)
-library(Matching)
-library(survey)
-library(ggplot2)
-library(tableone)
+source("scripts/matching.R")
 ```
 
-We discard controls with propensity score less than the minimum propensity score of treated group. We use the logistic model provided by Dehejia and Wahba to estimate the propensity score[^2].
-
-[^2]: Dehejia, R. and Wahba, S. (1998) *Propensity score matching methods for non-experimental causal studies*. <doi:10.3386/w6829>.
+#### **a. ATE:**
 
 ```{r}
-set.seed(42)
-```
-
-```{r}
-# Create two more attributes
-psid1_re74$u74 <- as.integer(psid1_re74$re74 == 0)
-psid1_re74$u75 <- as.integer(psid1_re74$re75 == 0)
-```
-
-These are the propensity score statistics and distribution of PSID-1 + LDW dataset. As we can see, the propensity scores of treated and control group are very different, corresponding to the differences in covariates X.
-
-```{r}
-pscore_psid1 <- estimate_propensity_score(psid1_re74, 
-                treat~ age + I(age^2) + education + I(education^2) + 
-                married + nodegree + black + hispanic + 
-                re74 + I(re74^2) + re75 + I(re75^2) + 
-                u74 * black, is_plot=TRUE)
-```
-
-## 2. Matching and Estimate Average Treatment Effect (ATE)
-
-#### i. PSID1
-
-Following Dehejia and Wahba (1998), I will try to do 1-to-1 nearest propensity score matching and with replacement.
-
-##### **a. ATE:**
-
-```{r}
-# Add propensity score
-filtered_psid1 <- pscore_psid1$filter_data
-filtered_psid1$ps <- pscore_psid1$pscore
 y <- filtered_psid1$re78
 z <- filtered_psid1$treat
 x <- matrix(filtered_psid1$ps, nrow(filtered_psid1), 1)
+```
 
-
+```{r}
 # Matching without bias adjustment
 ate.psid1 <- Match(
       Y = y, 
@@ -117,7 +82,7 @@ ate.matched.psid1 <- filtered_psid1[c(ate.psid1$index.treated, ate.psid1$index.c
 summary(ate.psid1)
 ```
 
-##### **b. ATT**
+#### **b. ATT**
 
 ```{r}
 # Matching without bias adjustment
@@ -187,9 +152,9 @@ MatchBalance(treat~ age + I(age^2) + education + I(education^2) +
                 u74 * black, data=filtered_psid1, match.out=ate.psid1)
 ```
 
-As we can see, the treated units were well matched across all propensity scores. We can also reproduce the average treatment effect on the treated of Match() using these estimators[^3]:
+As we can see, the treated units were well matched across all propensity scores. We can also reproduce the average treatment effect on the treated of Match() using these estimators[^2]:
 
-[^3]: Abadie, Alberto and Guido Imbens. 2006. “Large Sample Properties of Matching Estimators for Average Treatment Effects.” *Econometrica* 74(1): 235-267.
+[^2]: Abadie, Alberto and Guido Imbens. 2006. “Large Sample Properties of Matching Estimators for Average Treatment Effects.” *Econometrica* 74(1): 235-267.
 
 $$
 \hat{\tau}_M = \frac{1}{N} \sum_{W_i=1} \left( \hat{Y}_i(1) - \hat{Y}_i(0) \right) 
@@ -228,9 +193,9 @@ paired.diffs <- matched.treated - matched.control
 (ate <- mean(paired.diffs))
 ```
 
-For bias adjustment estimator proposed by Abadie, Alberto and Guido Imbens[^4],
+For bias adjustment estimator proposed by Abadie, Alberto and Guido Imbens[^3],
 
-[^4]: Abadie, Alberto and Guido Imbens. 2006. “Large Sample Properties of Matching Estimators for Average Treatment Effects.” *Econometrica* 74(1): 235-267.
+[^3]: Abadie, Alberto and Guido Imbens. 2006. “Large Sample Properties of Matching Estimators for Average Treatment Effects.” *Econometrica* 74(1): 235-267.
 
 ```{r}
 # Matching with bias adjustment
@@ -265,23 +230,9 @@ summary(att.psid1.AI)
 
 Let's apply it for other dataset.
 
-#### ii. CPS1
+### ii. CPS1
 
-##### a. ATE
-
-```{r}
-# Create 2 columns u74 and u75
-cps1_re74 <- preprocess_data(cps1_re74)
-```
-
-```{r}
-# Estimate propensity score
-pscore_cps1 <- estimate_propensity_score(cps1_re74, 
-              treat ~ age + I(age^2) + I(age^3) + education + 
-              I(education^2) + married + nodegree + black + 
-              hispanic + re74 + re75 + u74 + u75 + education*re74
-              , is_plot=TRUE)
-```
+#### a. ATE
 
 ```{r}
 # Perform matching
@@ -326,7 +277,7 @@ ate.cps1.AI <- Match(
 summary(ate.cps1.AI)
 ```
 
-##### b. ATT
+#### b. ATT
 
 ```{r}
 # Perform matching for ATT biased estimator
@@ -358,7 +309,7 @@ att.cps1.AI <- Match(
 summary(att.cps1.AI)
 ```
 
-#### iii. PSID2-3
+### iii. Other datasets
 
 ```{r}
 cat("1. ATE WITHOUT Bias Adjustment:\n")
@@ -404,8 +355,6 @@ att.psid3.AI <- ps_matching_analysis(psid3_re74, formula=treat ~ age + I(age^2) 
     re74 + re75 + u74 + u75, TRUE)
 ```
 
-#### iv. CPS2-3
-
 ```{r}
 cat("1. ATE WITHOUT Bias Adjustment:\n")
 ate.cps2 <- ps_matching_analysis(cps2_re74, formula=treat ~ age + I(age^2) + education + I(education^2) + 
@@ -450,9 +399,9 @@ What I have learnt so far:
 
 -   In randomization, we can estimate ATE by $\hat{\tau} = E[Y(1) - Y(0)] = E[Y(1)] - E[Y(0)] = E[Y(1)|Z=1] - E[Y(0)|Z=0]$ because $\{Y(0), Y(1)\}$ is independent of Z and the linearity of expectation. However in observational study, that assumption is violated, so using that estimator will yield biases. But under strong ignorability assumption, that is $\{Y(1), Y(0)\}$ is independent of Z\|X, $E[Y(1) - Y(0) | X] = E[Y(1)|Z=1, X] - E[Y(0)|Z=0, X] = \tau(X)$, which can reduce the bias. Then to estimate $\hat{\tau}$, we can average this over the marginal distribution of X, which is $\hat{\tau} = E[\tau(X)]$.
 
--   As X can have high dimensions, propensity score matching estimators (Rosenbaum and Rubin (1983)) are widely used to estimate treatment effects.[^5] When the relevant differences between any two units are captured in the observed covariates, matching methods can yield an unbiased estimate of the treatment impact.[^6] Therefore, propensity score matching aims to balance the covariate differences between treated and control groups.
+-   As X can have high dimensions, propensity score matching estimators (Rosenbaum and Rubin (1983)) are widely used to estimate treatment effects.[^4] When the relevant differences between any two units are captured in the observed covariates, matching methods can yield an unbiased estimate of the treatment impact.[^5] Therefore, propensity score matching aims to balance the covariate differences between treated and control groups.
 
--   As we can never observe Yi(1) and Yi(0) together, we can use matching to impute the missing potential outcomes.[^7]
+-   As we can never observe Yi(1) and Yi(0) together, we can use matching to impute the missing potential outcomes.[^6]
 
 -   Why are ATTs so different from ATEs?
 
@@ -466,17 +415,17 @@ What I have learnt so far:
 
 -   How can I improve the result
 
-    -   Assessing the quality of the resulting matched samples, and perhaps iterating with steps 1 and 2 until well-matched samples result.[^8]
+    -   Assessing the quality of the resulting matched samples, and perhaps iterating with steps 1 and 2 until well-matched samples result.[^7]
 
     -   More analysis of the outcome.
 
-[^5]: Abedie and Imbens
+[^4]: Abedie and Imbens
 
-[^6]: Dehejia (1998)
+[^5]: Dehejia (1998)
 
-[^7]: Abedie and Imbens (2006)
+[^6]: Abedie and Imbens (2006)
 
-[^8]: Elizabeth A. Stuart, Matching Methods for Causal Inference: A Review and a Look Forward
+[^7]: Elizabeth A. Stuart, Matching Methods for Causal Inference: A Review and a Look Forward
 
 ### i. ATE
 
@@ -506,6 +455,7 @@ col_names <- c("Bias-Adjusted PSM ATE")
 
 ```{r}
 ate.result_table <- cbind(effects_table, ate.psm, ate.psm.AI)
+row.names(ate.result_table) <- row_names
 ate.result_table
 ```
 
@@ -537,215 +487,6 @@ col_names <- c("Bias-Adjusted PSM ATT")
 
 ```{r}
 att.result_table <- cbind(effects_table, att.psm, att.psm.AI)
+row.names(att.result_table) <- row_names
 att.result_table
 ```
-
-# B. Inverse Propensity Score Weighting
-
-We have this inverse propensity score weighting estimator[^9].
-
-[^9]: Ding, Peng. (2023). A First Course in Causal Inference. 10.48550/arXiv.2305.18793.
-
-$$
-\widehat{\tau}^{\text{ht}} = n^{-1} \sum_{i=1}^n \frac{Z_iY_i}{\hat{e}(X_i)} - n^{-1} \sum_{i=1}^n \frac{(1 - Z_i)Y_i}{1 - \hat{e}(X_i)}
-$$
-
-and
-
-$$
-\widehat{\tau}^{\text{ht}}_{|T_i=1} = n_1^{-1} \sum_{i=1}^n Z_iY_i - n_1^{-1} \sum_{i=1}^n \frac{\hat{e}(X_i)(1 - Z_i)Y_i}{1 - \hat{e}(X_i)}
-$$
-
-### i. PSID1
-
-```{r}
-# IPW ATE
-ate.psid1.ipw <- ps_IPW(filtered_psid1, estimand="ATE", norm=FALSE)
-paste("IPW ATE: ", ate.psid1.ipw$est)
-```
-
-```{r}
-# IPW ATE
-att.psid1.ipw <- ps_IPW(filtered_psid1, estimand="ATT", norm=FALSE)
-paste("IPW ATT: ", att.psid1.ipw$est)
-```
-
-Let's check distribution of the weights.
-
-```{r}
-# Extract weights and treatment
-weights <- ate.psid1.ipw$weights
-treat <- filtered_psid1$treat
-
-# Split weights by treatment group
-weights_control <- weights[treat == 0]
-weights_treated <- weights[treat == 1]
-
-# Define histogram breaks
-breaks <- seq(min(weights), max(weights), length.out = 31)
-
-# Plot histograms
-hist(weights_control, breaks = breaks, col = rgb(0, 0, 1, 0.6),
-     main = "Distribution of Weights by Treatment Group",
-     xlab = "Weights", ylab = "Count", xlim = range(weights))
-hist(weights_treated, breaks = breaks, col = rgb(1, 0, 0, 0.6),add = TRUE)
-
-# Add legend
-legend("topright", legend = c("Control", "Treated"),
-       fill = c(rgb(0, 0, 1, 0.6), rgb(1, 0, 0, 0.6)))
-
-```
-
-Some weights are very large, which may violate the overlap condition. What if we do more trimming?
-
-```{r}
-rm.idx <- which(filtered_psid1$ps < 0.1 | filtered_psid1$ps > 0.9)
-
-# PS distribution
-plot_pscore(filtered_psid1[-rm.idx, ], filtered_psid1$ps[-rm.idx])
-```
-
-```{r}
-trim_out1_IPW_ATE <- ps_IPW(filtered_psid1[-rm.idx, ], estimand="ATE")
-paste("IPW ATE: ", trim_out1_IPW_ATE$est)
-```
-
-What if we do not discard any controls,
-
-```{r}
-# Compute propensity scores but do not discard any controls
-no_trim_psid1_re74 <- preprocess_data(psid1_re74)
-
-formula <- treat ~ age + I(age^2) + education + I(education^2) +
-  married + nodegree + black + hispanic + re74 + I(re74^2) +
-  re75 + I(re75^2) + u74 * black
-
-ps_model <- glm(formula, family = binomial, data = no_trim_psid1_re74)
-```
-
-```{r}
-# Compute IPW ATE
-no_trim_psid1_re74$ps <- ps_model$fitted.values
-paste("IPW ATE: ", ps_IPW(no_trim_psid1_re74, "ATE")$est)
-```
-
-```{r}
-weights <- ps_IPW(no_trim_psid1_re74, "ATE")$weights
-treated_weights <- weights[no_trim_psid1_re74$treat == 1]
-control_weights <- weights[no_trim_psid1_re74$treat == 0]
-
-# Create side-by-side boxplots
-par(mfrow = c(1, 2))  # Set up the plotting area for 1 row and 2 columns
-
-# Boxplot for treated
-boxplot(
-  treated_weights,
-  main = "Treated Group",
-  ylab = "Weights",
-  col = "skyblue",
-  border = "darkblue",
-  outline = TRUE,
-  outcol = "red"
-)
-
-# Boxplot for control
-boxplot(
-  control_weights,
-  main = "Control Group",
-  ylab = "Weights",
-  col = "lightgreen",
-  border = "darkgreen",
-  outline = TRUE,
-  outcol = "red"
-)
-
-par(mfrow = c(1, 1))  # Reset plotting area
-
-```
-
-It seems like trimming significantly improves the estimate as we do not violate the strong overlap assumption, which is the propensity score is bounded away from 0 and 1.
-
-### ii. All datasets
-
-```{r}
-# Create a list of datasets after discarding controls
-datasets <- list(filtered_psid1, ate.psid2$trim.data, ate.psid3$trim.data, 
-                 filtered_cps1, ate.cps2$trim.data, ate.cps3$trim.data)
-
-# Create a list of datasets after truncating the estimated propensity score
-trim_datasets <- lapply(datasets, function(dataset) {
-  rm.idx <- which(dataset$ps < 0.1 | dataset$ps > 0.9)
-  dataset <- dataset[-rm.idx, ]
-  return(dataset)
-} )
-```
-
-```{r}
-# Compute inverse propensity score weighting ATE for main datasets
-out_list <- lapply(datasets, function(data) {
-  ps_IPW(data, estimand = "ATE")
-})
-
-# Display result
-row_names <- c("NSW", "PSID-1", "PSID-2", "PSID-3", "CPS-1", "CPS-2", "CPS-3")
-col_names <- c("IPW ATE")
-(ate.ipw.results <- create_psm_result(out_list, row_names, col_names))
-```
-
-```{r}
-# Compute ATE using IPW for trimmed datasets
-out_list <- lapply(trim_datasets, function(data) {
-  ps_IPW(data, estimand = "ATE")
-})
-
-# Display result
-row_names <- c("NSW", "PSID-1", "PSID-2", "PSID-3", "CPS-1", "CPS-2", "CPS-3")
-col_names <- c("IPW ATE")
-(trim_ate.ipw.results <- create_psm_result(out_list, row_names, col_names))
-```
-
-```{r}
-# Compute inverse propensity score weighting ATT for main datasets
-out_list <- lapply(datasets, function(data) {
-  ps_IPW(data, estimand = "ATT")
-})
-
-# Display result
-row_names <- c("NSW", "PSID-1", "PSID-2", "PSID-3", "CPS-1", "CPS-2", "CPS-3")
-col_names <- c("IPW ATT")
-(att.ipw.results <- create_psm_result(out_list, row_names, col_names))
-```
-
-## Summary
-
-It has been proved that
-
-$$
-\tau = E\{Y(1) - Y(0)\} = E \left\{ \frac{ZY}{e(X)} - \frac{(1-Z)Y}{1-e(X)} \right\}.
-$$
-
-Under strong ignorability and overlap condition. As the formulas can be very big if the propensity score is very close to 1 or 0, the weighting estimators blow up to infinity resulting in extremely unstable behaviors in finite samples.[^10] As a result, the more we trimmed the psid1 dataset, the better estimate we got.
-
-[^10]: Peng Ding
-
--   Treated subjects with a very low propensity score can result in a very large weight. Similarly, a control subject with a propensity score close to one can result in a very large weight. Such weights can increase the variability of the estimated treatment effect.[^11] (Why?)
-
-[^11]: P. C. AUSTIN AND E. A. STUART
-
-### i. ATE
-
-```{r}
-cbind(ate.result_table, ate.ipw.results)
-```
-
-### ii. ATT
-
-```{r}
-cbind(att.result_table, att.ipw.results)
-```
-
-#### 1. What impacts the IPW estimates -TODO
-
-Most of the extremely large weights correspond to treated units with very small propensity score.
-
-#### 2. IPW vs Matching -TODO

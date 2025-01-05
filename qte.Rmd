@@ -17,188 +17,22 @@ The second method is to use IPW estimators for $F_0(z)$ and $F_1(z)$.[^2] From t
 
 ## 1. Firpo Approach
 
-### a. Estimate Propensity Score using Series Logit Estimator
-
 ```{r}
-load("data/ps_lalonde.RData")
 source("scripts/report.R")
+source("scripts/qte_f.R")
 library(qte)
 ```
 
-```{r}
-# Data for testing
-data <- psid1_re74
-covariates <- c("age", "education", "re74") 
-```
-
-```{r}
-# Generate polynomial basis returning vector H_X(K)
-# cov refers to numerical covariates that we want to have higher terms
-generate_polynomial_basis <- function(data, degree, cov) {
-  
-  H_K <- cbind(data, data.frame(Intercept = 1))  # Add the constant term
-
-  for (cov in covariates) {
-    poly_terms <- as.data.frame(poly(data[[cov]], degree = degree, raw = TRUE)[, -1])
-    colnames(poly_terms) <- paste0(cov, "_", seq_len(ncol(poly_terms)) + 1)
-    H_K <- cbind(H_K, poly_terms) 
-  }
-  
-  return(as.data.frame(H_K))
-}
-
-degree <- 2
-data_H_K <- generate_polynomial_basis(data, degree, covariates)
-data_H_K
-```
-
-```{r}
-# Objective function to find the propensity scores
-objective_func <- function(pi, H_K, treat) {
-  N <- nrow(H_K)
-  z <- rowSums(H_K * pi)  # H_K(x)' * pi
-  p <- 1 / (1 + exp(-z))
-  p <- pmax(pmin(p, 1 - 1e-15), 1e-15)  # Bound p
-  log_lik <- (treat * log(p) + (1 - treat) * log(1 - p))
-  return(-sum(log_lik)/N) 
-}
-```
-
-```{r}
-# Estimate pi using minimize the objective function
-estimate_pi <- function(H_K, treat, pi.init = NULL) {
-  
-  result <- optim(
-    par = pi.init,
-    fn = objective_func,
-    H_K = H_K,
-    treat = treat,
-    method = "BFGS" 
-  )
-  
-  return(result$par)
-}
-```
-
-```{r}
-# Compute propensity scores
-compute_propensity_scores <- function(H_K, pi_K) {
-  z <- rowSums(H_K * pi_K)  # H_K(x)' * pi
-  p <- 1 / (1 + exp(-z))
-  return(p)
-}
-```
-
-```{r}
-# Full propensity score estimation pipeline
-firpo_propensity_scores <- function(data) {
-  
-  cov <- setdiff(colnames(data), c("treat", "re78")) # exclude 'treat' and "re78"
-  H_K <- data[cov]
-  treat <- data[["treat"]]
-  pi.init <- rep(0, length(cov))
-  
-  pi_K <- estimate_pi(H_K, treat, pi.init)
-  
-  # Compute propensity scores
-  propensity_scores <- compute_propensity_scores(H_K, pi_K)
-  
-  return(list(coefficients = pi_K, ps = propensity_scores))
-}
-
-```
-
-```{r}
-# Firpo ps model for psid1 dataset - page 6 in the supplement 
-cols_up_to_degree_2 <- c(
-  "treat", "age", "education", "black", "hispanic", "married", "nodegree", "re74", "re75", "u74", "u75", "Intercept", 
-  "age_2", "education_2", "re74_2")
-
-ps1_fibro <- firpo_propensity_scores(data_H_K)$ps
-```
-
-```{r}
-min_treat_ps <- min(ps1_fibro[data_H_K$treat == 1])
-max_treat_ps <- max(ps1_fibro[data_H_K$treat == 1])
-  
-filter_mask <- (ps1_fibro > min_treat_ps & ps1_fibro < max_treat_ps) | data_H_K$treat == 1
-ps1_fibro_trim <- ps1_fibro[filter_mask]
-summary(ps1_fibro_trim)
-```
-
-```{r}
-# Create probability bins
-bins <- cut(ps1_fibro, breaks = seq(0, 1, by = 0.1), right = FALSE)
-
-# Count treated and control units in each bin
-counts_treat_0 <- table(bins[data_H_K$treat == 0])
-counts_treat_1 <- table(bins[data_H_K$treat == 1])
-
-# Combine counts
-counts_matrix <- rbind(counts_treat_0, counts_treat_1)
-
-# Generate bin labels
-group_labels <- paste(seq(0.1, 1, by = 0.1))
-
-# Create bar plot
-barplot(
-  counts_matrix,
-  beside = TRUE,
-  col = c("white", "blue"),
-  legend.text = c("Control", "Treated"),
-  main = "Histogram of Estimated Propensity Score",
-  xlab = "Probability Bin",
-  ylab = "Frequency",
-  names.arg = group_labels,
-  ylim = c(0, 200)
-)
-```
-
-The code is very wrong.
-
-### b. Estimate Quantile Treatment Effect
+### a. QTE estimation
 
 Check function is defined as
 
 $$
 p_r(a) = a \cdot ( \tau - \mathbb{1}(a \leq 0))$$
 
-```{r}
-# Define the check function
-# Source code - https://github.com/bcallaway11/BMisc/blob/master/R/BMisc.R
-# https://rdrr.io/cran/qte/src/R/ciqte.R
-# I implement it again for studying and trimming purpose
-check_function <- function(a, tau) {
-  return(a * (tau - (1 * (a <= 0))))
-}
-```
-
 To find $\hat{q}_{1,r}$ , we minimize
 
 $$ \frac{1}{N} \sum_{i=1}^N \frac{T_i}{\hat{p}(X_i)} \cdot(Y_i - q) \cdot (\tau - 1\{Y_i < q\})$$
-
-```{r}
-# Define the quantile objective function
-q_objective_func <- function(q, y, tau, weights) {
-  return(mean(weights * check_function(y - q, tau)))
-}
-```
-
-```{r}
-# Estimate the `tau` quantile 
-estimate_quantile <- function(tau, y, weights) {
-  optim(
-    par = median(y),
-    fn = q_objective_func,
-    y = y,
-    tau = tau,
-    weights = weights,
-    method = "Brent",
-    lower = min(y),
-    upper = max(y)
-  )$par
-}
-```
 
 We estimate QTE as[^3]
 
@@ -208,88 +42,80 @@ $$
 QTE = \hat{q}_{1, \tau} - \hat{q}_{0, \tau}
 $$
 
-```{r}
-# Estimate QTE
-estimate_QTE <- function(data, tau, obs=TRUE) {
-  
-  # QTE for experimental study
-  if (obs == FALSE) {
-    quantile.1 <- estimate_quantile(tau, data[data$treat==1,]$re78, rep(1, nrow(data[data$treat==1,])))
-    quantile.0 <- estimate_quantile(tau, data[data$treat==0,]$re78, rep(1, nrow(data[data$treat==0,])))
-    
-    return(list(qte=quantile.1 - quantile.0, q1=quantile.1, q0=quantile.0))
-  }
-  
-  w.1 <- data$treat / data$ps
-  w.0 <- (1 - data$treat) / (1 - data$ps)
-  
-  quantile.1 <- estimate_quantile(tau, data$re78, w.1)
-  quantile.0 <- estimate_quantile(tau, data$re78, w.0)
-  
-  return(list(qte=quantile.1 - quantile.0, q1=quantile.1, q0=quantile.0))
-}
-```
-
-```{r}
-# Estimate multiple QTE
-estimate_QTEs <- function(data, taus, obs = TRUE) {
-  # Use sapply to avoid manual indexing
-  result <- sapply(taus, function(tau) {
-    estimate_QTE(data, tau = tau, obs)$qte
-  })
-  return(result)
-}
-```
-
-```{r}
-# Test function
-taus <- c(0.25, 0.5, 0.75)
-estimate_QTEs(re74, taus, FALSE)
-```
-
-#### i. For Experimental data
+#### i. Experimental data
 
 For randomized dataset, QTE equals to the differences between quantiles of the treated and the experimental controls[^4].
 
 [^4]: Firpo, S**.** (2007). Supplement to "Efficient Semiparametric Estimation of Quantile Treatment Effects." *Econometrica*, 75(1), 259–276, p. 261. Supplementary Material, p. 3.
 
 ```{r}
-# Run functions on experimental datasets and observational datasets before controlling covariates
-datasets <- list(re74, psid1_re74, psid2_re74, psid3_re74, cps1_re74, cps2_re74, cps3_re74)
+datasets <- list(re74, psid1_re74, cps1_re74)
+taus <- c(0.25, 0.5, 0.75)
+```
 
+```{r}
+# Run functions on experimental datasets and observational datasets before controlling covariates
 ex_qte_list <- lapply(datasets, function(data) {
-  estimate_QTEs(data, taus, FALSE)
+  estimate_QTEs(data, taus, estimand="QTE", FALSE)
 })
 ```
 
 ```{r}
 # Display result
 col_names <- c("QTE 0.25", "0.5", "0.75")
-(ex_qte_result <- create_qte_result(ex_qte_list, row_names, col_names))
+(ex_qte_result <- create_qte_result(ex_qte_list, c("NSW", "PSID-1", "CPS-1"), col_names))
 ```
 
-#### **ii. For Observational data**
+#### **ii. Observational data**
 
 We use the propensity score estimates from Dehejia and Wahba model, and datasets after discarding some controls.
 
+For QTE:
+
 ```{r}
 # Run functions using IPW method observational datasets to compute QTE
-datasets <- list(filtered_psid1, ate.psid2$trim.data, ate.psid3$trim.data, 
-                 filtered_cps1, ate.cps2$trim.data, ate.cps3$trim.data)
+SI_datasets <- list(filtered_psid1_SI, filtered_cps1_SI)
+LM_datasets <- list(filtered_psid1, filtered_cps1)
+```
 
-qte_results <- lapply(datasets, function(data) {
+```{r}
+qte_results.SI <- lapply(SI_datasets, function(data) {
+  estimate_QTEs(data, taus)
+})
+
+qte_results.logistic <- lapply(LM_datasets, function(data) {
   estimate_QTEs(data, taus)
 })
 ```
 
 ```{r}
 col_names <- c("QTE IPW 0.25", "0.5", "0.75")
-qte.result_table <- create_qte_result(out_list, row_names, col_names)
+qte.result_table.SI <- create_qte_result(qte_results.SI,  c("NSW", "PSID-1", "CPS-1"), col_names)
+qte.result_table.logistic <- create_qte_result(qte_results.logistic,  c("NSW", "PSID-1", "CPS-1"), col_names)
 ```
 
 ```{r}
 # Display result
-cbind(ex_qte_result, qte.result_table)
+cbind(ex_qte_result, qte.result_table.SI, qte.result_table.logistic)
+```
+
+For QTT:
+
+```{r}
+qtt_results.logistic <- lapply(LM_datasets, function(data) {
+  estimate_QTEs(data, taus, "QTT")
+})
+
+qtt_results.SI <- lapply(SI_datasets, function(data) {
+  estimate_QTEs(data, taus, "QTT")
+})
+```
+
+```{r}
+col_names <- c("QTT IPW 0.25", "0.5", "0.75")
+qtt.result_table.logistic <- create_qte_result(qtt_results.logistic,  c("NSW", "PSID-1", "CPS-1"), col_names)
+qtt.result_table.SI <- create_qte_result(qtt_results.SI,  c("NSW", "PSID-1", "CPS-1"), col_names)
+(qtt.result_table <- cbind(ex_qte_result, qtt.result_table.SI, qtt.result_table.logistic))
 ```
 
 ### Summary

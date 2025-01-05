@@ -42,11 +42,11 @@ create_psm_result <- function(psm_list,
 
 create_qte_result <- function(qte_list, row_labels, col_labels) {
   # Number of items in the list
-  n <- 7
+  n <- length(row_labels)
   i = 0
   
   if (length(qte_list) < 7) {
-    i <- 7 - length(qte_list)
+    i <- n - length(qte_list)
   }
   
   # Initialize result matrix
