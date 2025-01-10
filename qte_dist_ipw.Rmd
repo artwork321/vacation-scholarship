@@ -1,0 +1,331 @@
+---
+title: "Quantile Treatment Effect"
+output: html_notebook
+---
+
+# Quantile Treatment Effect
+
+Sometimes, we might want to know how treatments affect different parts of the outcome distribution, QTE and QTT are desired to answer such questions.
+
+I will use the estimators proposed by Firpo (2007).[^1] The first step is to estimate the propensity score using a nonparametric method. In his paper, he employed HIR method, which used a logistic power series approximation. The second step is to minimize a weighted sum of check functions. However, instead of a nonparametric method, I will use the semi-parametric approach, which is using single index models. Its efficient has been proved through several papers, including Mingfeng Zhan & Karen X. Yan (2024)[^2] and Yu Sun, Karen X. Yan & Qi Li (2021).[^3]
+
+[^1]: Sergio Firpo. (2007). Efficient Semiparametric Estimation of Quantile Treatment Effects. *Econometrica*, *75*(1), 259–276. <http://www.jstor.org/stable/4123114>
+
+[^2]: Mingfeng Zhan & Karen X. Yan (2024) On the estimation of quantile
+    treatment effects using a semiparametric propensity score, Econometric Reviews, 43:9,
+    752-773, DOI: 10.1080/07474938.2024.2363237
+
+[^3]: Yu Sun, Karen X. Yan & Qi Li (2021) Estimation of average treatment effect
+    based on a semiparametric propensity score, Econometric Reviews, 40:9, 852-866, DOI:
+    10.1080/07474938.2021.1889206
+
+## Firpo QTE
+
+```{r}
+source("scripts/report.R")
+source("scripts/qte_f.R")
+library(qte)
+```
+
+According to Firpo estimation, a check function is defined as
+
+$$
+p_r(a) = a \cdot ( \tau - \mathbb{1}(a \leq 0))$$
+
+And to find $\hat{q}_{1,r}$ , we minimize
+
+$$ \frac{1}{N} \sum_{i=1}^N \frac{T_i}{\hat{p}(X_i)} \cdot(Y_i - q) \cdot (\tau - 1\{Y_i < q\})$$
+
+Finally, QTE is estimated as[^4]
+
+[^4]: **Firpo, S.** (2007). Supplement to "Efficient Semiparametric Estimation of Quantile Treatment Effects." *Econometrica*, 75(1), 259–276, p. 261.
+
+$$
+QTE = \hat{q}_{1, \tau} - \hat{q}_{0, \tau}
+$$
+
+#### i. Without controlling covariates
+
+For randomized dataset, QTE can be estimated as the differences between quantiles of the treated and the experimental controls[^5].
+
+[^5]: Firpo, S**.** (2007). Supplement to "Efficient Semiparametric Estimation of Quantile Treatment Effects." *Econometrica*, 75(1), 259–276, p. 261. Supplementary Material, p. 3.
+
+```{r}
+datasets <- list(re74, psid1_re74, cps1_re74)
+taus <- c(0.25, 0.5, 0.75)
+```
+
+```{r}
+# Run functions on experimental datasets and observational datasets before controlling covariates
+ex_qte_list <- lapply(datasets, function(data) {
+  estimate_QTEs(data, taus, estimand="QTE", obs=FALSE)
+})
+```
+
+```{r}
+# Display result
+col_names <- c("QTE 0.25", "0.5", "0.75")
+(ex_qte_result <- create_qte_result(ex_qte_list, c("NSW", "PSID-1", "CPS-1"), col_names))
+```
+
+Without controlling for covariates, the QTEs of PSID-1 and CPS-1 are negative and significantly different from those observed in the NSW data. This suggests a substantial mismatch between the populations in the treated and control groups. There are confounding factors that affect the income after the training program that are not properly controlled, likely resulting in biased estimates of the treatment effect. Consequently, the negative QTEs indicate that the treatment effects estimated from PSID-1 and CPS-1 are unreliable and potentially misleading when compared to the NSW experimental benchmark.
+
+#### **ii. Controlling covariates by IPW method**
+
+#### a. QTE
+
+```{r}
+SI_datasets <- list(trim_psid1_SI, trim_cps1_SI) # trimmed dataset with propensity score estimated by a single index model
+
+LM_datasets <- list(filtered_psid1, filtered_cps1) # trimmed dataset with propensity score estimated by a logistic model
+```
+
+```{r}
+# Estimate QTEs
+qte_results.SI <- lapply(trim_SI_datasets, function(data) {
+  estimate_QTEs(data, taus)
+})
+
+qte_results.logistic <- lapply(LM_datasets, function(data) {
+  estimate_QTEs(data, taus)
+})
+```
+
+```{r}
+# Display result
+col_names <- c("QTE IPW 0.25", "0.5", "0.75")
+
+qte.result_table.SI <- create_qte_result(qte_results.SI,  c("NSW", "PSID-1", "CPS-1"), col_names)
+
+qte.result_table.logistic <- create_qte_result(qte_results.logistic,  c("NSW", "PSID-1", "CPS-1"), col_names)
+
+
+cbind(ex_qte_result, qte.result_table.SI, qte.result_table.logistic)
+```
+
+The QTEs of the SI dataset, obtained using IPW, are closer to the experimental benchmark (NSW) compared to the estimates from the logistic regression model. This may indicate that the IPW method improves the covariate balance. However, apart from q(0.25), the higher quantile results remain negative. The persistence of negative QTEs at higher quantiles may also indicate some assumptions were violated. For example, the propensity score model underlying may not adequately account for all covariates or fails to balance the distributions at higher income levels, or there is lack of randomness in the treatment conditional on the covariates at higher income levels.
+
+#### b. QTT
+
+```{r}
+qtt_results.logistic <- lapply(LM_datasets, function(data) {
+  estimate_QTEs(data, taus, "QTT")
+})
+
+qtt_results.SI <- lapply(trim_SI_datasets, function(data) {
+  estimate_QTEs(data, taus, "QTT")
+})
+```
+
+```{r}
+col_names <- c("QTT IPW 0.25", "0.5", "0.75")
+
+qtt.result_table.logistic <- create_qte_result(qtt_results.logistic,  c("NSW", "PSID-1", "CPS-1"), col_names)
+
+qtt.result_table.SI <- create_qte_result(qtt_results.SI,  c("NSW", "PSID-1", "CPS-1"), col_names)
+
+(qtt.result_table <- cbind(ex_qte_result, qtt.result_table.SI, qtt.result_table.logistic))
+```
+
+The QTT are very different from QTE:
+
+-   
+
+Surprisingly, the results of logistic model are much closer to the benchmark for the QTT although it has bad result for QTE:
+
+-   
+
+# Distribution estimation
+
+We use the IPW estimators for $F_0(z)$ and $F_1(z)$ proposed by Stephen and Yu-Chin (2014) as:
+
+$$
+\hat{F}_0(z) = \frac{\sum_{i=1}^N \frac{(1 - T_i) \cdot \mathbb{1}(Y_i \leq z)}{1 - \hat{p}(X_i)}}{\sum_{i=1}^N \frac{1 - T_i}{1 - \hat{p}(X_i)}},
+$$
+
+$$
+\hat{F}_1(z) = \frac{\sum_{i=1}^N \frac{T_i \cdot \mathbb{1}(Y_i \leq z)}{\hat{p}(X_i)}}{\sum_{i=1}^N \frac{T_i}{\hat{p}(X_i)}}.
+$$
+
+```{r}
+source("scripts/distribution_f.R")
+library(gbutils)
+```
+
+First, let's look at the empirical distribution of re74 and psid1. As expected, the two distributions are very different. While the re74 distributions might suggest that under job training improved the real earnings without job training, the psid-1 and cps-1 distribution might show the opposite.
+
+```{r}
+########################## RE74 ########################
+re78_treat1 <- re74$re78[re74$treat == 1]
+re78_treat0 <- re74$re78[re74$treat == 0]
+
+# Create empirical CDFs
+empirical_cdf_treat1 <- ecdf(re78_treat1)
+empirical_cdf_treat0 <- ecdf(re78_treat0)
+
+# Plot the empirical distributions
+plot(empirical_cdf_treat1, main = "CDFs of RE74 dataset",
+     xlab = "Income (re78)", ylab = "Cumulative Probability",
+     col = "red", lwd = 2, verticals = TRUE, do.points = FALSE,
+     xlim = range(re74$re78))  # Set x-axis limits to match both CDFs
+lines(empirical_cdf_treat0, col = "blue", lwd = 2, verticals = TRUE, do.points = FALSE)
+
+# Add legend
+legend("bottomright", legend = c("F1", "F0"),
+       col = c("red", "blue"), lwd = 2)
+
+# Add grid lines for better visualization
+grid()
+
+########################## PSID-1 ########################
+re78_treat1 <- psid1_re74$re78[psid1_re74$treat == 1]
+re78_treat0 <- psid1_re74$re78[psid1_re74$treat == 0]
+
+# Create empirical CDFs
+empirical_cdf_treat1 <- ecdf(re78_treat1)
+empirical_cdf_treat0 <- ecdf(re78_treat0)
+
+# Plot the empirical distributions
+plot(empirical_cdf_treat1, main = "CDFS of PSID-1 dataset",
+     xlab = "Income (re78)", ylab = "Cumulative Probability",
+     col = "red", lwd = 2, verticals = TRUE, do.points = FALSE,
+     xlim = range(psid1_re74$re78))  # Set x-axis limits to match both CDFs
+lines(empirical_cdf_treat0, col = "blue", lwd = 2, verticals = TRUE, do.points = FALSE)
+
+# Add legend
+legend("bottomright", legend = c("F1", "F0"),
+       col = c("red", "blue"), lwd = 2)
+
+# Add grid lines for better visualization
+grid()
+
+########################## CPS-1 ########################
+re78_treat1 <- cps1_re74$re78[cps1_re74$treat == 1]
+re78_treat0 <- cps1_re74$re78[cps1_re74$treat == 0]
+
+# Create empirical CDFs
+empirical_cdf_treat1 <- ecdf(re78_treat1)
+empirical_cdf_treat0 <- ecdf(re78_treat0)
+
+# Plot the empirical distributions
+plot(empirical_cdf_treat1, main = "CDFS of CPS-1 dataset",
+     xlab = "Income (re78)", ylab = "Cumulative Probability",
+     col = "red", lwd = 2, verticals = TRUE, do.points = FALSE,
+     xlim = range(cps1_re74$re78))  # Set x-axis limits to match both CDFs
+lines(empirical_cdf_treat0, col = "blue", lwd = 2, verticals = TRUE, do.points = FALSE)
+
+# Add legend
+legend("bottomright", legend = c("F1", "F0"),
+       col = c("red", "blue"), lwd = 2)
+
+# Add grid lines for better visualization
+grid()
+```
+
+We used the trimmed datasets with propensity score estimated by a semi-parametric model as suggested in the Mingfeng Zhan & Karen X. Yan (2024) paper. Although
+
+```{r}
+################# PSID-1 #####################
+z_values <- seq(0, 100000, by = 100)
+
+cdf1_results <- sapply(z_values, estimate_CDF1, data = trim_psid1_SI)
+cdf0_results <- sapply(z_values, estimate_CDF0, data = trim_psid1_SI)
+
+# Plot the results
+plot(z_values, cdf0_results, type = "l", col = "blue", lwd = 2,
+     xlab = "re78", ylab = "Cumulative Probability",
+     main = "Estimated CDFs for PSID-1")
+
+lines(z_values, cdf1_results, col = "red", lwd = 2)
+
+legend("bottomright", legend = c("F1", "F0"),
+       col = c("red", "blue"), lwd = 2)
+
+
+################# CPS-1 #####################
+# Sample data
+z_values <- seq(0, 100000, by = 100)
+
+cdf1_results <- sapply(z_values, estimate_CDF1, data = trim_cps1_SI)
+cdf0_results <- sapply(z_values, estimate_CDF0, data = trim_cps1_SI)
+
+# Plot the results
+plot(z_values, cdf0_results, type = "l", col = "blue", lwd = 2,
+     xlab = "re78", ylab = "Cumulative Probability",
+     main = "Estimated CDFs for CPS-1")
+
+lines(z_values, cdf1_results, col = "red", lwd = 2)
+
+legend("bottomright", legend = c("F1", "F0"),
+       col = c("red", "blue"), lwd = 2)
+```
+
+**On treated,**
+
+```{r}
+
+################# PSID-1 #####################
+z_values <- seq(0, 100000, by = 100)
+
+cdf1_results <- sapply(z_values, estimate_CDF1, data = trim_psid1_SI, estimand="treated")
+cdf0_results <- sapply(z_values, estimate_CDF0, data = trim_psid1_SI, estimand="treated")
+
+# Plot the results
+plot(z_values, cdf0_results, type = "l", col = "blue", lwd = 2,
+     xlab = "re78", ylab = "Cumulative Probability",
+     main = "Estimated CDFs for PSID-1")
+
+lines(z_values, cdf1_results, col = "red", lwd = 2)
+
+legend("bottomright", legend = c("F1", "F0"),
+       col = c("red", "blue"), lwd = 2)
+
+
+################# CPS-1 #####################
+# Sample data
+z_values <- seq(0, 100000, by = 100)
+
+cdf1_results <- sapply(z_values, estimate_CDF1, data = trim_cps1_SI, estimand="treated")
+cdf0_results <- sapply(z_values, estimate_CDF0, data = trim_cps1_SI, estimand="treated")
+
+# Plot the results
+plot(z_values, cdf0_results, type = "l", col = "blue", lwd = 2,
+     xlab = "re78", ylab = "Cumulative Probability",
+     main = "Estimated CDFs for CPS-1")
+
+lines(z_values, cdf1_results, col = "red", lwd = 2)
+
+legend("bottomright", legend = c("F1", "F0"),
+       col = c("red", "blue"), lwd = 2)
+```
+
+# Summary
+
+-   What did I do?
+
+<!-- -->
+
+-   Why are my results so different from Firpo
+
+<!-- -->
+
+-   What makes QTT and QTE so different?
+
+# Playground
+
+```{r}
+# Compute qtes
+q <- ci.qte(re78~treat, xformla=~age + I(age^2) + education + I(education^2) +
+  married + nodegree + black + hispanic + re74 + I(re74^2) +
+  re75 + I(re75^2) + u74 * black , se=FALSE, data=filtered_psid1)
+summary(q)
+```
+
+```{r}
+# Compute qtt
+qtt <- ci.qtet(re78~treat, xformla=~age + I(age^2) + education + I(education^2) +
+  married + nodegree + black + hispanic + re74 + I(re74^2) +
+  re75 + I(re75^2) + u74 * black , se=FALSE, data=filtered_psid1)
+
+summary(qtt)
+```

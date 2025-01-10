@@ -5,18 +5,17 @@ calculate_pscore_logistic <- function(model, data, method, is_plot = FALSE) {
   # Extract fitted values
   if (method == "logistic") {
     fitted_values <- model$fitted.values
+    
+    # Determine minimum and maximum propensity score for treated group
+    min_treat_ps <- min(fitted_values[data$treat == 1])
+    max_treat_ps <- max(fitted_values[data$treat == 1])
+    
+    filter_mask <- (fitted_values > min_treat_ps & fitted_values < max_treat_ps) | data$treat == 1
   }
   else if (method == "SI") {
-    fitted_values <- predict(model, type="response")
+    fitted_values <- fitted(model)
+    filter_mask <- (data$treat == 0) | data$treat == 1
   }
-
-  
-  # Determine minimum and maximum propensity score for treated group
-  min_treat_ps <- min(fitted_values[data$treat == 1])
-  max_treat_ps <- max(fitted_values[data$treat == 1])
-  
-  # Filter data based on propensity scores
-  filter_mask <- (fitted_values > min_treat_ps & fitted_values < max_treat_ps) | data$treat == 1
   data_filter <- data[filter_mask, ]
   pscore_filter <- fitted_values[filter_mask]
   
@@ -81,11 +80,13 @@ estimate_propensity_score <- function(data, formula = NULL, method="logistic", o
   }
   
   if (method == "SI") {
-    bw <- npindexbw(treat ~ age + education + 
-                    married + nodegree + black + hispanic + 
-                    re74 + re75 + u74 + u75, method="ichimura", data=data, optim.method=optim.method)
+    bw <- npindexbw(formula=formula, method="ichimura", data=data, optim.method=optim.method)
     
-    ps_model <- npindex(bw, gradients=TRUE)
+    bw$bw = bw$bw * (nrow(data)^(-1/10))
+    
+    ps_model <- npindex(bw, data=data)
+    
+    summary(ps_model)
   }
   
   

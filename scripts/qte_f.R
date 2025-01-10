@@ -1,3 +1,5 @@
+source("scripts/distribution_f.R")
+
 # Define the check function
 # Source code - https://github.com/bcallaway11/BMisc/blob/master/R/BMisc.R
 # https://rdrr.io/cran/qte/src/R/ciqte.R
@@ -29,7 +31,7 @@ estimate_quantile <- function(tau, y, weights) {
 
 
 # Estimate QTE
-estimate_QTE <- function(data, tau, obs=TRUE) {
+estimate_QTE <- function(data, tau, method, obs=TRUE) {
   
   # QTE for experimental study
   if (obs == FALSE) {
@@ -39,11 +41,20 @@ estimate_QTE <- function(data, tau, obs=TRUE) {
     return(list(qte=quantile.1 - quantile.0, q1=quantile.1, q0=quantile.0))
   }
   
-  w.1 <- data$treat / (data$ps * nrow(data))
-  w.0 <- (1 - data$treat) / ((1 - data$ps) * nrow(data))
-  
-  quantile.1 <- estimate_quantile(tau, data$re78, w.1)
-  quantile.0 <- estimate_quantile(tau, data$re78, w.0)
+  if (method == "firpo") {
+    w.1 <- data$treat / (data$ps * nrow(data))
+    w.0 <- (1 - data$treat) / ((1 - data$ps) * nrow(data))
+    
+    quantile.1 <- estimate_quantile(tau, data$re78, w.1)
+    quantile.0 <- estimate_quantile(tau, data$re78, w.0)
+  }
+  else if (method == "dist") {
+    quantile.1 <- cdf2quantile(tau, estimate_CDF1, data=data)
+    quantile.0 <- cdf2quantile(tau, estimate_CDF0, data=data)
+  }
+  else {
+    print("Method is invalid")
+  }
   
   return(list(qte=quantile.1 - quantile.0, q1=quantile.1, q0=quantile.0))
 }
@@ -64,11 +75,11 @@ estimate_QTT <- function(data, tau) {
 }
 
 # Estimate multiple QTEs
-estimate_QTEs <- function(data, taus, estimand="QTE", obs = TRUE) {
-  # Use sapply to avoid manual indexing
+estimate_QTEs <- function(data, taus, estimand="QTE", method = "firpo", obs = TRUE) {
+
   if (estimand == "QTE") {
     result <- sapply(taus, function(tau) {
-      estimate_QTE(data, tau = tau, obs)$qte
+      estimate_QTE(data, tau = tau, method, obs)$qte
     })
   }
   else if (estimand == "QTT") {

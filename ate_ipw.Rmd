@@ -39,7 +39,7 @@ att.psid1.ipw <- ps_IPW(filtered_psid1_SI, estimand="ATT", norm=FALSE)
 paste("IPW ATT: ", att.psid1.ipw$est)
 ```
 
-Let's check distribution of the weights.
+Without trimming, the propensity score can violate the overlap assumption. Let's check distribution of the weights.
 
 ```{r}
 # Extract weights and treatment
@@ -65,12 +65,25 @@ legend("topright", legend = c("Control", "Treated"),
 
 ```
 
-Some weights are very large, which may violate the overlap condition.
+Some weights are very large as expected.
+
+```{r}
+trim_cps1_SI <- filtered_cps1_SI[filtered_cps1_SI$ps < 0.90 & filtered_cps1_SI$ps > 0.1, ]
+trim_psid1_SI <- filtered_psid1_SI[filtered_psid1_SI$ps < 0.90 & filtered_psid1_SI$ps > 0.1, ]
+```
+
+Check the distribution of trimmed dataset
+
+```{r}
+plot_pscore(trim_cps1_SI, trim_cps1_SI$ps)
+plot_pscore(trim_psid1_SI, trim_psid1_SI$ps)
+```
 
 ```{r}
 # Create a list of datasets after discarding controls
 SI_datasets <- list(filtered_psid1_SI, filtered_cps1_SI)
 LM_datasets <- list(filtered_psid1, filtered_cps1)
+trim_SI_datasets <- list(trim_psid1_SI, trim_cps1_SI)
 ```
 
 ```{r}
@@ -79,7 +92,12 @@ ate_result.SI <- lapply(SI_datasets, function(data) {
   ps_IPW(data, estimand = "ATE")
 })
 
-# Compute inverse propensity score weighting ATE for main datasets
+# Compute inverse propensity score weighting ATE for trimmed datasets
+ate_result.trim.SI <- lapply(trim_SI_datasets, function(data) {
+  ps_IPW(data, estimand = "ATE")
+})
+
+# Compute inverse propensity score weighting ATE for logistic datasets
 ate_result.logistic <- lapply(LM_datasets, function(data) {
   ps_IPW(data, estimand = "ATE")
 })
@@ -89,7 +107,9 @@ ate_result.logistic <- lapply(LM_datasets, function(data) {
 # Display result
 row_names <- c("NSW", "PSID-1", "CPS-1")
 col_names <- c("IPW ATE")
+
 (ate.ipw.results.SI <- create_psm_result(ate_result.SI, row_names, col_names))
+(ate.ipw.results.trim.SI <- create_psm_result(ate_result.trim.SI, row_names, col_names))
 (ate.ipw.results.logistic <- create_psm_result(ate_result.logistic, row_names, col_names))
 ```
 
@@ -99,7 +119,10 @@ att_result.SI <- lapply(SI_datasets, function(data) {
   ps_IPW(data, estimand = "ATT")
 })
 
-# Compute inverse propensity score weighting ATT for main datasets
+att_result.trim.SI <- lapply(trim_SI_datasets, function(data) {
+  ps_IPW(data, estimand = "ATT")
+})
+
 att_result.logistic <- lapply(LM_datasets, function(data) {
   ps_IPW(data, estimand = "ATT")
 })
@@ -109,6 +132,7 @@ att_result.logistic <- lapply(LM_datasets, function(data) {
 # Display result
 col_names <- c("IPW ATT")
 (att.ipw.results.SI <- create_psm_result(att_result.SI, row_names, col_names))
+(att.ipw.results.SI <- create_psm_result(att_result.trim.SI, row_names, col_names))
 (att.ipw.results.logistic <- create_psm_result(att_result.logistic, row_names, col_names))
 ```
 
@@ -120,7 +144,7 @@ $$
 \tau = E\{Y(1) - Y(0)\} = E \left\{ \frac{ZY}{e(X)} - \frac{(1-Z)Y}{1-e(X)} \right\}.
 $$
 
-Under strong ignorability and overlap condition. As the formulas can be very big if the propensity score is very close to 1 or 0, the weighting estimators blow up to infinity resulting in extremely unstable behaviors in finite samples.[^2] As a result, the more we trimmed the psid1 dataset, the better estimate we got.
+Under strong ignorability and overlap condition. As the formulas can be very big if the propensity score is very close to 1 or 0, the weighting estimators blow up to infinity resulting in extremely unstable behaviors in finite samples.[^2] As a result, the trimmed psid1 and cps1 dataset provide better ATE and ATT.
 
 [^2]: Peng Ding
 

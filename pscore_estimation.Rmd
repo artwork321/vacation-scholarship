@@ -8,7 +8,6 @@ output: html_notebook
 ## 1. Logistic model
 
 ```{r}
-load("data/ldw_lalonde.RData")
 source("scripts/pscore.R")
 ```
 
@@ -23,9 +22,8 @@ set.seed(42)
 We will focus on two datasets, which are PSID1 and CPS1.
 
 ```{r}
-# Create two more attributes
-psid1_re74$u74 <- as.integer(psid1_re74$re74 == 0)
-psid1_re74$u75 <- as.integer(psid1_re74$re75 == 0)
+# Create 2 columns u74 and u75
+psid1_re74 <- preprocess_data(psid1_re74)
 ```
 
 These are the propensity score statistics and distribution of PSID-1 + LDW dataset. As we can see, the propensity scores of treated and control group are very different, corresponding to the differences in covariates X.
@@ -35,7 +33,7 @@ pscore_psid1 <- estimate_propensity_score(psid1_re74,
                 treat~ age + I(age^2) + education + I(education^2) + 
                 married + nodegree + black + hispanic + 
                 re74 + I(re74^2) + re75 + I(re75^2) + 
-                u74 * black, method="logistic", is_plot=TRUE)
+                u74:black, method="logistic", is_plot=TRUE)
 ```
 
 For CPS 1,
@@ -50,7 +48,7 @@ cps1_re74 <- preprocess_data(cps1_re74)
 pscore_cps1 <- estimate_propensity_score(cps1_re74, 
               treat ~ age + I(age^2) + I(age^3) + education + 
               I(education^2) + married + nodegree + black + 
-              hispanic + re74 + re75 + u74 + u75 + education*re74
+              hispanic + re74 + re75 + u74 + u75 + education:re74
               , is_plot=TRUE)
 ```
 
@@ -72,11 +70,18 @@ library(np)
 ```
 
 ```{r}
-psid1_SI <- estimate_propensity_score(data=psid1_re74, method="SI", optim.method="Nelder-Mead",is_plot=TRUE)
+psid1_SI <- estimate_propensity_score(data=psid1_re74, formula=treat~age + I(age^2) + education + I(education^2) + 
+                married + nodegree + black + hispanic + 
+                re74 + I(re74^2) + re75 + I(re75^2),
+                method="SI", optim.method="CG",is_plot=TRUE)
 ```
 
 ```{r}
-cps1_SI <- estimate_propensity_score(data=cps1_re74, method="SI", is_plot=TRUE, optim.method="CG")
+cps1_SI <- estimate_propensity_score(data=cps1_re74, 
+         formula = treat ~ age + I(age^2) + I(age^3) + education + 
+          I(education^2) + married + nodegree + black + 
+          hispanic + re74 + re75 + u74 + u75,
+         method="SI", is_plot=TRUE, optim.method="CG")
 ```
 
 We lost more instances than logistic model.
@@ -84,9 +89,260 @@ We lost more instances than logistic model.
 ```{r}
 filtered_psid1_SI <- psid1_SI$filter_data
 filtered_psid1_SI$ps <- psid1_SI$ps
-filtered_psid1_SI <- filtered_psid1_SI[filtered_psid1_SI$ps < 1, ] # Remove those with pscore = 1
+#filtered_psid1_SI <- filtered_psid1_SI[filtered_psid1_SI$ps < 1 & filtered_psid1_SI$ps > 0, ] # Hold the overlap assumption
+```
 
+```{r}
 filtered_cps1_SI <- cps1_SI$filter_data
 filtered_cps1_SI$ps <- cps1_SI$ps
-filtered_cps1_SI <- filtered_cps1_SI[filtered_cps1_SI$ps < 1, ] # Remove those with pscore = 1
+#filtered_cps1_SI <- filtered_cps1_SI[filtered_psid1_SI$ps < 1 & filtered_psid1_SI$ps > 0, ] # Remove those with pscore = 1
+```
+
+## Playground
+
+```{r}
+bw_refined <- npindexbw(
+  #bws = bw_initial,  # Start with the initial bandwidth object
+  formula=treat~age + I(age^2) + education + I(education^2) +
+                married + nodegree + black + hispanic + 
+                re74 + I(re74^2) + re75 + I(re75^2),
+  method = "ichimura",
+  data = psid1_re74,
+  optim.method = "CG"
+)
+
+```
+
+```{r}
+bw_refined <- npindexbw(
+  #bws = bw_initial,  # Start with the initial bandwidth object
+  formula=treat ~ age + I(age^2) + I(age^3) + education + 
+              I(education^2) + married + nodegree + black + 
+              hispanic + re74 + re75 + u74 + u75,
+  method = "ichimura",
+  data = cps1_re74,
+  optim.method = "BFGS"
+)
+```
+
+```{r}
+print(bw_refined)
+```
+
+```{r}
+bw <- bw_refined
+```
+
+```{r}
+bw$bw = bw$bw * (nrow(data)^(-1/10))
+```
+
+```{r}
+ps_model <- npindex(bw)
+summary(ps_model)
+```
+
+```{r}
+fitted_values = fitted(ps_model)
+```
+
+```{r}
+datas <- psid1_re74
+
+# Determine minimum and maximum propensity score for treated group
+min_treat_ps <- min(fitted_values[datas$treat == 1])
+max_treat_ps <- max(fitted_values[datas$treat == 1])
+
+# Filter data based on propensity scores
+filter_mask <- (fitted_values >= min_treat_ps & fitted_values <= max_treat_ps) | datas$treat == 1
+data_filter <- datas[filter_mask, ]
+pscore_filter <- fitted_values[filter_mask]
+
+```
+
+```{r}
+plot_pscore(data, fitted_values)
+summary(fitted_values)
+
+plot_pscore(data_filter, pscore_filter)
+summary(pscore_filter)
+```
+
+```{r}
+test <- data_filter
+test$ps <- pscore_filter
+test <- test[test$ps < 1 & test$ps > 0, ]
+```
+
+```{r}
+test <- datas
+test$ps <- fitted_values
+test <- test[test$ps < 0.95 & test$ps > 0.05, ]
+```
+
+```{r}
+# IPW ATE
+lalonde.ipw <- ps_IPW(test, estimand="ATE", norm=FALSE)
+paste("IPW ATE: ", lalonde.ipw$est)
+
+lalonde.ipw <- ps_IPW(test, estimand="ATT", norm=FALSE)
+paste("IPW ATT: ", lalonde.ipw$est)
+```
+
+```{r}
+SingleIndex <- function(pts, X, Y, kerfun) {
+  # pts: d x n matrix of covariate values where conditional mean function is evaluated
+  # X: N x d matrix of covariate observations
+  # Y: N x 1 vector of response variable observations
+  # kerfun: kernel function
+  #
+  # Returns:
+  # list containing:
+  #   m: Estimated E(Y|X=pts)
+  #   betahat: estimated index coefficient
+  #   h: selected bandwidth
+  
+  # Set initial values for beta and h
+  bini <- solve(t(X) %*% X) %*% t(X) %*% Y  # equivalent to X\Y in MATLAB
+  sign1 <- sign(bini)
+  bini <- sign1[1] * bini/sqrt(sum(bini^2))
+  Zini <- X %*% bini
+  N <- length(Y)
+  hini <- sd(Zini) * N^(-1/5)
+  
+  # Estimate beta and h using semiparametric least squares
+  result <- optbeta(bini, hini, X, Y, kerfun)
+  betahat <- result$betahat
+  h <- result$h
+  
+  # Calculate final estimates
+  Z <- X %*% betahat
+  z <- t(betahat) %*% pts
+  dZz <- sweep(matrix(rep(Z, ncol(pts)), ncol=ncol(pts)), 2, as.vector(z)/h, "-")
+  Kh <- apply(dZz, 2, kerfun)/h
+  KhY <- sweep(Kh, 1, Y, "*")
+  m <- colSums(KhY)/colSums(Kh)
+  
+  return(list(m=m, betahat=betahat, h=h))
+}
+
+
+optbeta <- function(bini, hini, X, Y, kerfun) {
+  # Combine initial values for b and h
+  # Ensure initial values are within the unit disk
+  
+  ini <- c(bini, hini)
+  
+  
+  # Define the objective function
+  fn <- function(x) {
+    SLS(x, X, Y, kerfun)
+  }
+  
+  # Define the constraints
+  p <- length(ini)
+  A <- matrix(0, nrow = 1, ncol = p)
+  A[1, 1] <- -1
+  b <- 0
+  
+  # Nonlinear constraint: Unit disk (norm of betah <= 1)
+  unitdisk <- function(x) {
+    x1 = x[1: (length(x) - 1)]
+    sum(x1^2) - 1  # This must be <= 0
+  }
+  
+  hin <- function(betah) {
+    h <- betah[length(betah)]  # Extract h (last element of betah)
+    -h  # Ensure h > 0 by enforcing -h < 0
+  }
+
+  # Call fmincon
+  result <- fmincon(
+    x0 = ini,                   # Initial values
+    fn = fn,    # Objective function
+    A = A,                      # Linear inequality constraints (A * x <= b)
+    b = b,
+    hin = hin,
+    heq = unitdisk,             # Nonlinear inequality constraints
+    maxiter = 1000
+  )
+  
+  # Extract results
+  betahat <- result$par[-length(result$par)]  # All parameters except last
+  h <- result$par[length(result$par)]         # Last parameter
+  
+  list(betahat = betahat, h = h)
+}
+
+
+SLS <- function(betah, X, Y, kerfun) {
+  # Calculate SLS for estimating beta and h
+  beta <- betah[1:(length(betah)-1)]
+  h <- betah[length(betah)]
+  
+  Z <- X %*% beta
+  mLOO <- Leave_one_out_LC(Z, Y, h, kerfun)
+  
+  return(mean((Y - mLOO)^2))
+}
+
+Leave_one_out_LC <- function(Z, Y, h, kerfun) {
+  # Calculate leave-one-out local constant estimates
+  N <- length(Z)
+  dZ <- outer(Z, Z, "-")/h
+  dZ <- matrix(dZ, nrow = N, ncol = N) 
+  
+  # Ensure we're working with matrices
+  Kh <- gaussian_kernel(dZ)/h
+  KhY <- sweep(Kh, 2, Y, "*")
+
+  # Remove diagonal elements for leave-one-out
+  diag(Kh) <- 0
+  diag(KhY) <- 0
+  
+  KhLOO <- rowSums(Kh)
+  KhYLOO <- rowSums(KhY)
+  
+  if (any(KhLOO == 0)) warning("Some rows of KhLOO are zero!")
+    KhLOO[KhLOO == 0] <- 1e-8
+    
+  
+  
+  out <- KhYLOO/KhLOO
+  if (any(out == 0)) warning("Some rows of KhLOO are zero!")
+    out[out == 0] <- 1e-8
+  
+  print(h)
+  
+  return(out)
+}
+
+# Example kernel function (Gaussian kernel)
+gaussian_kernel <- function(x) {
+  return(dnorm(x))
+}
+
+```
+
+```{r}
+# Define X and T from your dataset
+X <- as.matrix(data[, c("age", "education", "married", "nodegree", "black", 
+                        "hispanic", "re74", "re75")])  # Covariates
+T <- data$treat  # Treatment variable (response)
+```
+
+```{r}
+# Call the SingleIndex function
+result <- SingleIndex(t(X), X, T, gaussian_kernel)
+
+# Extract results
+PT1X <- result$m         # Estimated E(T | X=pts)
+betahat <- result$betahat # Estimated index coefficient
+h <- result$h            # Selected bandwidth
+
+# Display results
+cat("Estimated E(T | X=pts):", PT1X, "\n")
+cat("Estimated beta:", betahat, "\n")
+cat("Selected bandwidth (h):", h, "\n")
+
 ```

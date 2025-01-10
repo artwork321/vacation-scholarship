@@ -1,0 +1,143 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# Double Score Matching for QTE
+
+Following matching method for QTE and QTT from Yunsun (2021), I directly use their functions to calculate the QTE and QTT for trimmed PSID-1 and CPS-1 with propensity score estimated by the single index model. The prognostic score will be estimated using a GLM model with the same predictors as the single index model.
+
+## QTE
+
+```{r}
+taus <- c(0.25, 0.5, 0.75)
+
+# Function to streamline matching process
+run_matching_qte <- function(data, covariates, additional_terms, ps_column, taus) {
+  Y <- data[,"re78"]
+  X <- as.matrix(data[, covariates])
+  A <- data[,"treat"]
+  Z <- cbind(X, additional_terms(X))  # Add non-linear terms
+  sapply(taus, function(tau) {
+    dsmatchQTE(Y, X, A, p=tau, method = "dsm", ps=data[[ps_column]], model.pg="linpred", lp.pg=Z)$est.ds
+  })
+}
+```
+
+### Matching for Trimmed PSID-1
+
+```{r}
+matching_qte_psid1_SI <- run_matching_qte(
+  data = trim_psid1_SI,
+  covariates = c("age", "education", "black", "hispanic", "married", "nodegree", "re74", "re75"),
+  additional_terms = function(X) {
+    cbind(X[,"age"]^2, X[,"education"]^2, X[,"re74"]^2, X[,"re75"]^2)
+  },
+  ps_column = "ps",
+  taus = taus
+)
+```
+
+### Matching for Trimmed CPS-1
+
+```{r}
+matching_qte_cps1_SI <- run_matching_qte(
+  data = trim_cps1_SI,
+  covariates = c("age", "education", "black", "hispanic", "married", "nodegree", "re74", "re75", "u74", "u75"),
+  additional_terms = function(X) {
+    cbind(X[,"age"]^2, X[,"age"]^3, X[,"education"]^2)
+  },
+  ps_column = "ps",
+  taus = taus
+)
+```
+
+## QTT
+
+```{r}
+taus <- c(0.25, 0.5, 0.75)
+
+# Function to streamline matching process
+run_matching_qtt <- function(data, covariates, additional_terms, ps_column, taus) {
+  Y <- data[,"re78"]
+  X <- as.matrix(data[, covariates])
+  A <- data[,"treat"]
+  Z <- cbind(X, additional_terms(X))  # Add non-linear terms
+  sapply(taus, function(tau) {
+    dsmatchQTT(Y, X, A, p=tau, method = "dsm", ps=data[[ps_column]], model.pg="linpred", lp.pg=Z)$est.ds
+  })
+}
+```
+
+### Matching for Trimmed PSID-1
+
+```{r}
+matching_qtt_psid1_SI <- run_matching_qtt(
+  data = trim_psid1_SI,
+  covariates = c("age", "education", "black", "hispanic", "married", "nodegree", "re74", "re75"),
+  additional_terms = function(X) {
+    cbind(X[,"age"]^2, X[,"education"]^2, X[,"re74"]^2, X[,"re75"]^2)
+  },
+  ps_column = "ps",
+  taus = taus
+)
+```
+
+### Matching for Trimmed CPS-1
+
+```{r}
+matching_qtt_cps1_SI <- run_matching_qtt(
+  data = trim_cps1_SI,
+  covariates = c("age", "education", "black", "hispanic", "married", "nodegree", "re74", "re75", "u74", "u75"),
+  additional_terms = function(X) {
+    cbind(X[,"age"]^2, X[,"age"]^3, X[,"education"]^2)
+  },
+  ps_column = "ps",
+  taus = taus
+)
+```
+
+### Matching for Filtered PSID-1
+
+```{r}
+matching_qtt_psid1_logi <- run_matching_qtt(
+  data = filtered_psid1,
+  covariates = c("age", "education", "black", "hispanic", "married", "nodegree", "re74", "re75"),
+  additional_terms = function(X) {
+    cbind(X[,"age"]^2, X[,"education"]^2, X[,"re74"]^2, X[,"re75"]^2)
+  },
+  ps_column = "ps",
+  taus = taus
+)
+```
+
+### Matching for Filtered CPS-1
+
+```{r}
+matching_qtt_cps1_logi <- run_matching_qtt(
+  data = filtered_cps1,
+  covariates = c("age", "education", "black", "hispanic", "married", "nodegree", "re74", "re75", "u74", "u75"),
+  additional_terms = function(X) {
+    cbind(X[,"age"]^2, X[,"age"]^3, X[,"education"]^2)
+  },
+  ps_column = "ps",
+  taus = taus
+)
+```
+
+## Display result
+
+```{r}
+matching_qtt_results_SI <- list(matching_qtt_psid1_SI, matching_qtt_cps1_SI)
+matching_qtt_results_logi <- list(matching_qtt_psid1_logi, matching_qtt_cps1_logi)
+```
+
+```{r}
+col_names <- c("QTT IPW 0.25", "0.5", "0.75")
+
+matching_qtt.result_table.logistic <- create_qte_result(matching_qtt_cps1_logi,  c("NSW", "PSID-1", "CPS-1"), col_names)
+
+matching_qtt.result_table.SI <- create_qte_result(c(matching_qtt_psid1_SI,matching_qtt_psid1_SI),  c("NSW", "PSID-1", "CPS-1"), col_names)
+
+(qtt.result_table <- cbind(ex_qte_result, matching_qtt.result_table.SI, matching_qtt.result_table.logistic))
+```

@@ -149,7 +149,7 @@ mtext("Propensity Score Distributions", outer = TRUE, cex = 1.5)
 MatchBalance(treat~ age + I(age^2) + education + I(education^2) + 
                 married + nodegree + black + hispanic + 
                 re74 + I(re74^2) + re75 + I(re75^2) + 
-                u74 * black, data=filtered_psid1, match.out=ate.psid1)
+                u74:black, data=filtered_psid1, match.out=ate.psid1)
 ```
 
 As we can see, the treated units were well matched across all propensity scores. We can also reproduce the average treatment effect on the treated of Match() using these estimators[^2]:
@@ -359,22 +359,22 @@ att.psid3.AI <- ps_matching_analysis(psid3_re74, formula=treat ~ age + I(age^2) 
 cat("1. ATE WITHOUT Bias Adjustment:\n")
 ate.cps2 <- ps_matching_analysis(cps2_re74, formula=treat ~ age + I(age^2) + education + I(education^2) + 
     married + nodegree + black + hispanic + 
-    re74 + re75 + u74 + u75 + education*re74 + I(age^3))
+    re74 + re75 + u74 + u75 + education:re74 + I(age^3))
 
 cat("2. ATE WITH Bias Adjustment:\n")
 ate.cps2.AI <- ps_matching_analysis(cps2_re74, formula=treat ~ age + I(age^2) + education + I(education^2) + 
     married + nodegree + black + hispanic + 
-    re74 + re75 + u74 + u75 + education*re74 + I(age^3), bias_adjust=TRUE)
+    re74 + re75 + u74 + u75 + education:re74 + I(age^3), bias_adjust=TRUE)
 
 cat("3. WITHOUT Bias Adjustment:\n")
 att.cps2 <- ps_matching_analysis(cps2_re74, formula=treat ~ age + I(age^2) + education + I(education^2) + 
     married + nodegree + black + hispanic + 
-    re74 + re75 + u74 + u75 + education*re74 + I(age^3), estimand="ATT")
+    re74 + re75 + u74 + u75 + education:re74 + I(age^3), estimand="ATT")
 
 cat("4. WITH Bias Adjustment:\n")
 att.cps2.AI <- ps_matching_analysis(cps2_re74, formula=treat ~ age + I(age^2) + education + I(education^2) + 
     married + nodegree + black + hispanic + 
-    re74 + re75 + u74 + u75 + education*re74 + I(age^3), bias_adjust=TRUE, estimand="ATT")
+    re74 + re75 + u74 + u75 + education:re74 + I(age^3), bias_adjust=TRUE, estimand="ATT")
 ```
 
 ```{r}
